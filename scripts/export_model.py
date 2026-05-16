@@ -80,6 +80,15 @@ def main():
         do_constant_folding=True,
     )
 
+    data_path = model_path + ".data"
+    if os.path.exists(data_path):
+        print("  Converting external data to inline...")
+        import onnx
+        model_proto = onnx.load(model_path)
+        onnx.save(model_proto, model_path, save_as_external_data=False)
+        os.remove(data_path)
+        print("  Done. Single-file ONNX model.")
+
     print(f"Done! Files in {OUTPUT_DIR}:")
     for f in sorted(os.listdir(OUTPUT_DIR)):
         size = os.path.getsize(os.path.join(OUTPUT_DIR, f))
