@@ -5,12 +5,14 @@ Export sentence-transformers/all-MiniLM-L6-v2 to ONNX format.
 Requires: pip install transformers torch onnx onnxscript
 
 Outputs:
-  models/model.onnx  - ONNX model (transformer body, last_hidden_state output)
-  models/vocab.txt   - WordPiece vocabulary for tokenizer
+  models/model.onnx       - ONNX graph
+  models/model.onnx.data  - ONNX weights (sidecar)
+  models/vocab.txt        - WordPiece vocabulary for tokenizer
 """
 import os
 
-OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "..", "models")
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+OUTPUT_DIR = os.path.join(SCRIPT_DIR, "..", "models")
 
 
 def main():
@@ -25,7 +27,28 @@ def main():
 
     vocab_path = os.path.join(OUTPUT_DIR, "vocab.txt")
     print(f"Saving vocab ({len(tokenizer.vocab)} tokens) to {vocab_path}")
-    tokenizer.save_vocabulary(OUTPUT_DIR)
+    saved_files = tokenizer.save_vocabulary(OUTPUT_DIR)
+    print(f"  -> saved: {saved_files}")
+
+    if not os.path.exists(vocab_path):
+        alt = os.path.join(OUTPUT_DIR, "vocab.json")
+        if os.path.exists(alt):
+            os.rename(alt, vocab_path)
+            print("  -> renamed vocab.json to vocab.txt")
+        else:
+            for f in os.listdir(OUTPUT_DIR):
+                if f.startswith("vocab"):
+                    src = os.path.join(OUTPUT_DIR, f)
+                    os.rename(src, vocab_path)
+                    print(f"  -> renamed {f} to vocab.txt")
+                    break
+
+    if not os.path.exists(vocab_path):
+        print("ERROR: vocab.txt was not created. Writing manual vocab...")
+        with open(vocab_path, "w") as f:
+            for token, idx in sorted(tokenizer.vocab.items(), key=lambda x: x[1]):
+                f.write(token + "\n")
+        print(f"  -> wrote {len(tokenizer.vocab)} tokens to {vocab_path}")
 
     print(f"Exporting {model_id} to ONNX...")
     from transformers import AutoModel
