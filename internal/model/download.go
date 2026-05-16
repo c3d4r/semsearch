@@ -88,12 +88,12 @@ func EnsureModels() error {
 	}
 
 	localModel := filepath.Join("models", modelFileName)
-	localVocab := filepath.Join("models", vocabFileName)
 	if _, err := os.Stat(localModel); err == nil {
-		if _, err := os.Stat(localVocab); err == nil {
-			fmt.Println("Using local model files from ./models/")
-			return copyFiles(localModel, localVocab, modelPath, vocabPath)
+		fmt.Println("Using local model files from ./models/")
+		if err := copyAllModelFiles("models", modelsDir); err != nil {
+			return fmt.Errorf("copy model files: %w", err)
 		}
+		return nil
 	}
 
 	baseURL := os.Getenv("SEMSEARCH_MODEL_URL")
@@ -118,19 +118,29 @@ func EnsureModels() error {
 	return nil
 }
 
-func copyFiles(srcModel, srcVocab, dstModel, dstVocab string) error {
-	for _, pair := range [][2]string{{srcModel, dstModel}, {srcVocab, dstVocab}} {
-		src, err := os.Open(pair[0])
+func copyAllModelFiles(srcDir, dstDir string) error {
+	entries, err := os.ReadDir(srcDir)
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		name := e.Name()
+		if !strings.HasPrefix(name, "model.") && !strings.HasPrefix(name, "vocab.") && name != "tokenizer.model" {
+			continue
+		}
+		src := filepath.Join(srcDir, name)
+		dst := filepath.Join(dstDir, name)
+		srcFile, err := os.Open(src)
 		if err != nil {
 			return err
 		}
-		defer src.Close()
-		dst, err := os.Create(pair[1])
+		defer srcFile.Close()
+		dstFile, err := os.Create(dst)
 		if err != nil {
 			return err
 		}
-		defer dst.Close()
-		if _, err := io.Copy(dst, src); err != nil {
+		defer dstFile.Close()
+		if _, err := io.Copy(dstFile, srcFile); err != nil {
 			return err
 		}
 	}
