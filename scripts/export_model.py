@@ -2,16 +2,16 @@
 """
 Export sentence-transformers/all-MiniLM-L6-v2 to ONNX format.
 
-Requires: pip install optimum[onnxruntime] transformers sentence-transformers
+Requires: pip install transformers torch onnx onnxscript
 
 Outputs:
   models/model.onnx  - ONNX model (transformer body, last_hidden_state output)
   models/vocab.txt   - WordPiece vocabulary for tokenizer
 """
 import os
-import json
 
 OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "..", "models")
+
 
 def main():
     os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -20,6 +20,7 @@ def main():
 
     print(f"Loading tokenizer from {model_id}...")
     from transformers import AutoTokenizer
+
     tokenizer = AutoTokenizer.from_pretrained(model_id)
 
     vocab_path = os.path.join(OUTPUT_DIR, "vocab.txt")
@@ -31,6 +32,7 @@ def main():
     import torch
 
     model = AutoModel.from_pretrained(model_id)
+    model.eval()
 
     dummy_input_ids = torch.randint(0, tokenizer.vocab_size, (1, 16), dtype=torch.int64)
     dummy_attention_mask = torch.ones(1, 16, dtype=torch.int64)

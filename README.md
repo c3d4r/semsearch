@@ -15,7 +15,7 @@ brew install onnxruntime
 # Or download from: https://github.com/microsoft/onnxruntime/releases
 
 # 2. Export the embedding model (one-time, requires Python)
-pip install transformers torch
+pip install transformers torch onnx onnxscript
 python3 scripts/export_model.py
 # Creates models/model.onnx (~80MB) and models/vocab.txt
 
