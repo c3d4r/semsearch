@@ -165,13 +165,14 @@ func FindONNXLibrary() (string, error) {
 	switch runtime.GOOS {
 	case "linux":
 		msg += "  apt install libonnxruntime\n"
-		msg += "  or: pip install onnxruntime && export ONNXRUNTIME_LIB=$(python3 -c \"import onnxruntime,os; print(os.path.join(os.path.dirname(onnxruntime.__file__),'capi','libonnxruntime.so'))\")\n"
+		msg += "  or: pip install onnxruntime\n"
+		msg += "  set ONNXRUNTIME_LIB to the versioned lib (e.g. libonnxruntime.1.20.1.so)\n"
 	case "darwin":
 		msg += "  pip install onnxruntime\n"
-		msg += "  export ONNXRUNTIME_LIB=$(python3 -c \"import onnxruntime,os; print(os.path.join(os.path.dirname(onnxruntime.__file__),'capi','libonnxruntime.dylib'))\")\n"
+		msg += "  set ONNXRUNTIME_LIB to the versioned lib (e.g. libonnxruntime.1.20.1.dylib)\n"
 	}
 	msg += "  Or download from: https://github.com/microsoft/onnxruntime/releases"
-	return "", fmt.Errorf(msg)
+	return "", fmt.Errorf("%s", msg)
 }
 
 func onnxLibName() string {
@@ -226,27 +227,52 @@ func findPythonONNXLibs(libName string) []string {
 			continue
 		}
 		dir := strings.TrimSpace(string(out))
-		if dir != "" {
-			libPath := filepath.Join(dir, "capi", libName)
-			if _, err := os.Stat(libPath); err == nil {
-				paths = append(paths, libPath)
-			}
+		if dir == "" {
+			continue
 		}
+		capiDir := filepath.Join(dir, "capi")
+		paths = append(paths, findLibInDir(capiDir)...)
 	}
 
 	home, err := os.UserHomeDir()
 	if err == nil {
-		pattern := filepath.Join(home, "Library", "Python", "*", "lib", "python*", "site-packages",
-			"onnxruntime", "capi", libName)
-		if matches, err := filepath.Glob(pattern); err == nil {
-			paths = append(paths, matches...)
-		}
-		uvPattern := filepath.Join(home, ".local", "share", "uv", "python", "*", "lib", "python*", "site-packages",
-			"onnxruntime", "capi", libName)
-		if matches, err := filepath.Glob(uvPattern); err == nil {
-			paths = append(paths, matches...)
+		for _, prefix := range []string{
+			filepath.Join(home, "Library", "Python"),
+			filepath.Join(home, ".local", "share", "uv", "python"),
+			filepath.Join(home, ".pyenv", "versions"),
+		} {
+			pattern := filepath.Join(prefix, "*", "lib", "python*", "site-packages", "onnxruntime", "capi")
+			if matches, err := filepath.Glob(pattern); err == nil {
+				for _, m := range matches {
+					paths = append(paths, findLibInDir(m)...)
+				}
+			}
 		}
 	}
 
 	return paths
+}
+
+func findLibInDir(dir string) []string {
+	prefix := "libonnxruntime"
+	suffix := ".so"
+	if runtime.GOOS == "darwin" {
+		suffix = ".dylib"
+	}
+	if runtime.GOOS == "windows" {
+		suffix = ".dll"
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+
+	for _, e := range entries {
+		name := e.Name()
+		if strings.HasPrefix(name, prefix) && strings.HasSuffix(name, suffix) {
+			return []string{filepath.Join(dir, name)}
+		}
+	}
+	return nil
 }
