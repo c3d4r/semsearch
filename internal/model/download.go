@@ -1,6 +1,8 @@
 package model
 
 import (
+	"archive/tar"
+	"compress/gzip"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,11 +14,13 @@ import (
 )
 
 const (
-	defaultBaseURL  = "https://github.com/c3d4r/semsearch/releases/download/v0.1.0"
-	modelFileName   = "model.onnx"
-	vocabFileName   = "vocab.txt"
-	cacheDirName    = "semsearch"
-	modelsDirName   = "models"
+	defaultBaseURL     = "https://github.com/c3d4r/semsearch/releases/download/v0.1.0"
+	modelFileName      = "model.onnx"
+	vocabFileName      = "vocab.txt"
+	cacheDirName       = "semsearch"
+	modelsDirName      = "models"
+	libDirName         = "lib"
+	ortDownloadVersion = "1.25.0"
 )
 
 func CacheDir() (string, error) {
@@ -57,6 +61,14 @@ func VocabPath() (string, error) {
 	return filepath.Join(dir, vocabFileName), nil
 }
 
+func LibDir() (string, error) {
+	cache, err := CacheDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(cache, libDirName), nil
+}
+
 func EnsureModels() error {
 	modelsDir, err := ModelsDir()
 	if err != nil {
@@ -93,7 +105,7 @@ func EnsureModels() error {
 	if _, err := os.Stat(modelPath); os.IsNotExist(err) {
 		fmt.Printf("Downloading %s...\n", modelFileName)
 		if err := downloadFile(modelPath, baseURL+"/"+modelFileName); err != nil {
-			return fmt.Errorf("download model: %w (place model.onnx and vocab.txt in %s, or set SEMSEARCH_MODEL_URL)", err, modelsDir)
+			return fmt.Errorf("download model: %w", err)
 		}
 	}
 
@@ -161,18 +173,7 @@ func FindONNXLibrary() (string, error) {
 		}
 	}
 
-	msg := fmt.Sprintf("%s not found. Install it:\n", onnxLibName())
-	switch runtime.GOOS {
-	case "linux":
-		msg += "  apt install libonnxruntime\n"
-		msg += "  or: pip install onnxruntime\n"
-		msg += "  set ONNXRUNTIME_LIB to the versioned lib (e.g. libonnxruntime.1.20.1.so)\n"
-	case "darwin":
-		msg += "  pip install onnxruntime\n"
-		msg += "  set ONNXRUNTIME_LIB to the versioned lib (e.g. libonnxruntime.1.20.1.dylib)\n"
-	}
-	msg += "  Or download from: https://github.com/microsoft/onnxruntime/releases"
-	return "", fmt.Errorf("%s", msg)
+	return EnsureONNXLib()
 }
 
 func onnxLibName() string {
@@ -211,12 +212,12 @@ func onnxLibCandidates() []string {
 		)
 	}
 
-	candidates = append(candidates, findPythonONNXLibs(libName)...)
+	candidates = append(candidates, findPythonONNXLibs()...)
 
 	return candidates
 }
 
-func findPythonONNXLibs(libName string) []string {
+func findPythonONNXLibs() []string {
 	var paths []string
 
 	for _, python := range []string{"python3", "python"} {
@@ -259,9 +260,6 @@ func findLibInDir(dir string) []string {
 	if runtime.GOOS == "darwin" {
 		suffix = ".dylib"
 	}
-	if runtime.GOOS == "windows" {
-		suffix = ".dll"
-	}
 
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -275,4 +273,129 @@ func findLibInDir(dir string) []string {
 		}
 	}
 	return nil
+}
+
+func EnsureONNXLib() (string, error) {
+	libDir, err := LibDir()
+	if err != nil {
+		return "", err
+	}
+
+	if err := os.MkdirAll(libDir, 0755); err != nil {
+		return "", fmt.Errorf("create lib dir: %w", err)
+	}
+
+	entries, _ := os.ReadDir(libDir)
+	for _, e := range entries {
+		name := e.Name()
+		prefix := "libonnxruntime"
+		suffix := ".so"
+		if runtime.GOOS == "darwin" {
+			suffix = ".dylib"
+		}
+		if strings.HasPrefix(name, prefix) && strings.HasSuffix(name, suffix) {
+			return filepath.Join(libDir, name), nil
+		}
+	}
+
+	url := ortDownloadURL()
+	if url == "" {
+		return "", fmt.Errorf("no ONNX Runtime download available for %s/%s — install it manually: https://github.com/microsoft/onnxruntime/releases", runtime.GOOS, runtime.GOARCH)
+	}
+
+	fmt.Printf("Downloading ONNX Runtime %s for %s/%s...\n", ortDownloadVersion, runtime.GOOS, runtime.GOARCH)
+	if err := downloadAndExtractONNX(url, libDir); err != nil {
+		return "", fmt.Errorf("download ONNX Runtime: %w", err)
+	}
+
+	entries, _ = os.ReadDir(libDir)
+	for _, e := range entries {
+		name := e.Name()
+		prefix := "libonnxruntime"
+		suffix := ".so"
+		if runtime.GOOS == "darwin" {
+			suffix = ".dylib"
+		}
+		if strings.HasPrefix(name, prefix) && strings.HasSuffix(name, suffix) {
+			return filepath.Join(libDir, name), nil
+		}
+	}
+
+	return "", fmt.Errorf("ONNX Runtime not found after download in %s", libDir)
+}
+
+func ortDownloadURL() string {
+	base := fmt.Sprintf("https://github.com/microsoft/onnxruntime/releases/download/v%s", ortDownloadVersion)
+	switch runtime.GOOS {
+	case "linux":
+		switch runtime.GOARCH {
+		case "amd64":
+			return base + "/onnxruntime-linux-x64-" + ortDownloadVersion + ".tgz"
+		case "arm64":
+			return base + "/onnxruntime-linux-aarch64-" + ortDownloadVersion + ".tgz"
+		}
+	case "darwin":
+		switch runtime.GOARCH {
+		case "amd64":
+			return base + "/onnxruntime-osx-x86_64-" + ortDownloadVersion + ".tgz"
+		case "arm64":
+			return base + "/onnxruntime-osx-arm64-" + ortDownloadVersion + ".tgz"
+		}
+	}
+	return ""
+}
+
+func downloadAndExtractONNX(url, destDir string) error {
+	resp, err := http.Get(url)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, url)
+	}
+
+	gzReader, err := gzip.NewReader(resp.Body)
+	if err != nil {
+		return err
+	}
+	defer gzReader.Close()
+
+	tarReader := tar.NewReader(gzReader)
+	for {
+		header, err := tarReader.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return err
+		}
+
+		name := filepath.Base(header.Name)
+		if !strings.HasPrefix(name, "libonnxruntime") {
+			continue
+		}
+		suffix := ".so"
+		if runtime.GOOS == "darwin" {
+			suffix = ".dylib"
+		}
+		if !strings.HasSuffix(name, suffix) {
+			continue
+		}
+
+		destPath := filepath.Join(destDir, name)
+		f, err := os.OpenFile(destPath, os.O_CREATE|os.O_WRONLY, 0755)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+
+		if _, err := io.Copy(f, tarReader); err != nil {
+			return err
+		}
+		return nil
+	}
+
+	return fmt.Errorf("libonnxruntime not found in archive")
 }
