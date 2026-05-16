@@ -45,6 +45,10 @@ func ModelsDir() (string, error) {
 }
 
 func ModelPath() (string, error) {
+	local := filepath.Join("models", modelFileName)
+	if _, err := os.Stat(local); err == nil {
+		return local, nil
+	}
 	dir, err := ModelsDir()
 	if err != nil {
 		return "", err
@@ -53,6 +57,10 @@ func ModelPath() (string, error) {
 }
 
 func VocabPath() (string, error) {
+	local := filepath.Join("models", vocabFileName)
+	if _, err := os.Stat(local); err == nil {
+		return local, nil
+	}
 	dir, err := ModelsDir()
 	if err != nil {
 		return "", err
@@ -90,18 +98,15 @@ func EnsureModels() error {
 	localModel := filepath.Join("models", modelFileName)
 	if _, err := os.Stat(localModel); err == nil {
 		fmt.Println("Using local model files from ./models/")
-		if err := copyAllModelFiles("models", modelsDir); err != nil {
-			return fmt.Errorf("copy model files: %w", err)
-		}
+		modelsDir = "models"
 		return nil
 	}
 
-	baseURL := os.Getenv("SEMSEARCH_MODEL_URL")
-	if baseURL == "" {
-		baseURL = defaultBaseURL
-	}
-
 	if _, err := os.Stat(modelPath); os.IsNotExist(err) {
+		baseURL := os.Getenv("SEMSEARCH_MODEL_URL")
+		if baseURL == "" {
+			baseURL = defaultBaseURL
+		}
 		fmt.Printf("Downloading %s...\n", modelFileName)
 		if err := downloadFile(modelPath, baseURL+"/"+modelFileName); err != nil {
 			return fmt.Errorf("download model: %w", err)
@@ -109,41 +114,16 @@ func EnsureModels() error {
 	}
 
 	if _, err := os.Stat(vocabPath); os.IsNotExist(err) {
+		baseURL := os.Getenv("SEMSEARCH_MODEL_URL")
+		if baseURL == "" {
+			baseURL = defaultBaseURL
+		}
 		fmt.Printf("Downloading %s...\n", vocabFileName)
 		if err := downloadFile(vocabPath, baseURL+"/"+vocabFileName); err != nil {
 			return fmt.Errorf("download vocab: %w", err)
 		}
 	}
 
-	return nil
-}
-
-func copyAllModelFiles(srcDir, dstDir string) error {
-	entries, err := os.ReadDir(srcDir)
-	if err != nil {
-		return err
-	}
-	for _, e := range entries {
-		name := e.Name()
-		if !strings.HasPrefix(name, "model.") && !strings.HasPrefix(name, "vocab.") && name != "tokenizer.model" {
-			continue
-		}
-		src := filepath.Join(srcDir, name)
-		dst := filepath.Join(dstDir, name)
-		srcFile, err := os.Open(src)
-		if err != nil {
-			return err
-		}
-		defer srcFile.Close()
-		dstFile, err := os.Create(dst)
-		if err != nil {
-			return err
-		}
-		defer dstFile.Close()
-		if _, err := io.Copy(dstFile, srcFile); err != nil {
-			return err
-		}
-	}
 	return nil
 }
 
