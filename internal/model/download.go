@@ -7,7 +7,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -167,6 +166,10 @@ func FindONNXLibrary() (string, error) {
 		}
 	}
 
+	if p := findInCacheDir(); p != "" {
+		return p, nil
+	}
+
 	for _, c := range onnxLibCandidates() {
 		if _, err := os.Stat(c); err == nil {
 			return c, nil
@@ -174,6 +177,30 @@ func FindONNXLibrary() (string, error) {
 	}
 
 	return EnsureONNXLib()
+}
+
+func findInCacheDir() string {
+	cache, err := CacheDir()
+	if err != nil {
+		return ""
+	}
+	libDir := filepath.Join(cache, libDirName)
+	entries, err := os.ReadDir(libDir)
+	if err != nil {
+		return ""
+	}
+	prefix := "libonnxruntime"
+	suffix := ".so"
+	if runtime.GOOS == "darwin" {
+		suffix = ".dylib"
+	}
+	for _, e := range entries {
+		name := e.Name()
+		if strings.HasPrefix(name, prefix) && strings.HasSuffix(name, suffix) {
+			return filepath.Join(libDir, name)
+		}
+	}
+	return ""
 }
 
 func onnxLibName() string {
@@ -212,67 +239,7 @@ func onnxLibCandidates() []string {
 		)
 	}
 
-	candidates = append(candidates, findPythonONNXLibs()...)
-
 	return candidates
-}
-
-func findPythonONNXLibs() []string {
-	var paths []string
-
-	for _, python := range []string{"python3", "python"} {
-		cmd := exec.Command(python, "-c",
-			"import onnxruntime,os; print(os.path.dirname(onnxruntime.__file__))")
-		out, err := cmd.Output()
-		if err != nil {
-			continue
-		}
-		dir := strings.TrimSpace(string(out))
-		if dir == "" {
-			continue
-		}
-		capiDir := filepath.Join(dir, "capi")
-		paths = append(paths, findLibInDir(capiDir)...)
-	}
-
-	home, err := os.UserHomeDir()
-	if err == nil {
-		for _, prefix := range []string{
-			filepath.Join(home, "Library", "Python"),
-			filepath.Join(home, ".local", "share", "uv", "python"),
-			filepath.Join(home, ".pyenv", "versions"),
-		} {
-			pattern := filepath.Join(prefix, "*", "lib", "python*", "site-packages", "onnxruntime", "capi")
-			if matches, err := filepath.Glob(pattern); err == nil {
-				for _, m := range matches {
-					paths = append(paths, findLibInDir(m)...)
-				}
-			}
-		}
-	}
-
-	return paths
-}
-
-func findLibInDir(dir string) []string {
-	prefix := "libonnxruntime"
-	suffix := ".so"
-	if runtime.GOOS == "darwin" {
-		suffix = ".dylib"
-	}
-
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return nil
-	}
-
-	for _, e := range entries {
-		name := e.Name()
-		if strings.HasPrefix(name, prefix) && strings.HasSuffix(name, suffix) {
-			return []string{filepath.Join(dir, name)}
-		}
-	}
-	return nil
 }
 
 func EnsureONNXLib() (string, error) {
