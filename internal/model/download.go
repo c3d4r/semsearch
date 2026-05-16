@@ -5,8 +5,10 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 )
 
 const (
@@ -153,34 +155,98 @@ func FindONNXLibrary() (string, error) {
 		}
 	}
 
+	for _, c := range onnxLibCandidates() {
+		if _, err := os.Stat(c); err == nil {
+			return c, nil
+		}
+	}
+
+	msg := fmt.Sprintf("%s not found. Install it:\n", onnxLibName())
 	switch runtime.GOOS {
 	case "linux":
-		candidates := []string{
-			"/usr/lib/libonnxruntime.so",
-			"/usr/lib/x86_64-linux-gnu/libonnxruntime.so",
-			"/usr/local/lib/libonnxruntime.so",
-		}
-		for _, c := range candidates {
-			if _, err := os.Stat(c); err == nil {
-				return c, nil
-			}
-		}
-		return "", fmt.Errorf(
-			"libonnxruntime.so not found. Install it or set ONNXRUNTIME_LIB env var.\n" +
-				"  Ubuntu/Debian: sudo apt install libonnxruntime\n" +
-				"  Or download from: https://github.com/microsoft/onnxruntime/releases")
+		msg += "  apt install libonnxruntime\n"
+		msg += "  or: pip install onnxruntime && export ONNXRUNTIME_LIB=$(python3 -c \"import onnxruntime,os; print(os.path.join(os.path.dirname(onnxruntime.__file__),'capi','libonnxruntime.so'))\")\n"
 	case "darwin":
-		candidates := []string{
-			"/usr/local/lib/libonnxruntime.dylib",
-			"/opt/homebrew/lib/libonnxruntime.dylib",
+		msg += "  pip install onnxruntime\n"
+		msg += "  export ONNXRUNTIME_LIB=$(python3 -c \"import onnxruntime,os; print(os.path.join(os.path.dirname(onnxruntime.__file__),'capi','libonnxruntime.dylib'))\")\n"
+	}
+	msg += "  Or download from: https://github.com/microsoft/onnxruntime/releases"
+	return "", fmt.Errorf(msg)
+}
+
+func onnxLibName() string {
+	switch runtime.GOOS {
+	case "darwin":
+		return "libonnxruntime.dylib"
+	default:
+		return "libonnxruntime.so"
+	}
+}
+
+func onnxLibCandidates() []string {
+	libName := onnxLibName()
+
+	candidates := []string{}
+
+	home, err := os.UserHomeDir()
+	if err == nil {
+		candidates = append(candidates,
+			filepath.Join(home, ".local", "lib", libName),
+			filepath.Join(home, ".cache", "semsearch", "lib", libName),
+		)
+	}
+
+	switch runtime.GOOS {
+	case "linux":
+		candidates = append(candidates,
+			"/usr/lib/"+libName,
+			"/usr/lib/x86_64-linux-gnu/"+libName,
+			"/usr/local/lib/"+libName,
+		)
+	case "darwin":
+		candidates = append(candidates,
+			"/usr/local/lib/"+libName,
+			"/opt/homebrew/lib/"+libName,
+		)
+	}
+
+	candidates = append(candidates, findPythonONNXLibs(libName)...)
+
+	return candidates
+}
+
+func findPythonONNXLibs(libName string) []string {
+	var paths []string
+
+	for _, python := range []string{"python3", "python"} {
+		cmd := exec.Command(python, "-c",
+			"import onnxruntime,os; print(os.path.dirname(onnxruntime.__file__))")
+		out, err := cmd.Output()
+		if err != nil {
+			continue
 		}
-		for _, c := range candidates {
-			if _, err := os.Stat(c); err == nil {
-				return c, nil
+		dir := strings.TrimSpace(string(out))
+		if dir != "" {
+			libPath := filepath.Join(dir, "capi", libName)
+			if _, err := os.Stat(libPath); err == nil {
+				paths = append(paths, libPath)
 			}
 		}
-		return "", fmt.Errorf("libonnxruntime.dylib not found. Install it or set ONNXRUNTIME_LIB env var")
-	default:
-		return "", fmt.Errorf("unsupported OS: %s", runtime.GOOS)
 	}
+
+	home, err := os.UserHomeDir()
+	if err == nil {
+		pattern := filepath.Join(home, "Library", "Python", "*", "lib", "python*", "site-packages",
+			"onnxruntime", "capi", libName)
+		if matches, err := filepath.Glob(pattern); err == nil {
+			paths = append(paths, matches...)
+		}
+		uvPattern := filepath.Join(home, ".local", "share", "uv", "python", "*", "lib", "python*", "site-packages",
+			"onnxruntime", "capi", libName)
+		if matches, err := filepath.Glob(uvPattern); err == nil {
+			paths = append(paths, matches...)
+		}
+	}
+
+	return paths
 }

@@ -8,11 +8,11 @@ Uses `all-MiniLM-L6-v2` via ONNX Runtime for embeddings and HNSW for fast approx
 
 ```bash
 # 1. Install ONNX Runtime (system dependency)
-# Ubuntu/Debian:
-sudo apt install libonnxruntime
-# macOS:
-brew install onnxruntime
-# Or download from: https://github.com/microsoft/onnxruntime/releases
+# Option A: via pip (recommended, works everywhere)
+pip install onnxruntime
+# Option B: system package manager
+#   Ubuntu/Debian: sudo apt install libonnxruntime
+#   Or download from: https://github.com/microsoft/onnxruntime/releases
 
 # 2. Export the embedding model (one-time, requires Python)
 pip install transformers torch onnx onnxscript
